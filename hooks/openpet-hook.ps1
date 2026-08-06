@@ -74,45 +74,45 @@ if ($rawStdin.Trim()) {
             $bubbleType = "tool-running"
             $ttl = 10000
             $tool = $data.tool_name
-            $input = $data.tool_input
+            $toolInput = $data.tool_input
 
             switch ($tool) {
                 "Bash" {
-                    $cmd = if ($input.command) { $input.command } else { "" }
+                    $cmd = if ($toolInput.command) { $toolInput.command } else { "" }
                     $bubbleText = "执行命令: $cmd"
                 }
                 "Read" {
-                    $path = if ($input.file_path) { Split-Path $input.file_path -Leaf } else { "..." }
+                    $path = if ($toolInput.file_path) { Split-Path $toolInput.file_path -Leaf } else { "..." }
                     $bubbleText = "读取文件: $path"
                 }
                 "Write" {
-                    $path = if ($input.file_path) { Split-Path $input.file_path -Leaf } else { "..." }
+                    $path = if ($toolInput.file_path) { Split-Path $toolInput.file_path -Leaf } else { "..." }
                     $bubbleText = "写入文件: $path"
                 }
                 "Edit" {
-                    $path = if ($input.file_path) { Split-Path $input.file_path -Leaf } else { "..." }
+                    $path = if ($toolInput.file_path) { Split-Path $toolInput.file_path -Leaf } else { "..." }
                     $bubbleText = "编辑文件: $path"
                 }
                 "Glob" {
-                    $bubbleText = "搜索文件: $($input.pattern)"
+                    $bubbleText = "搜索文件: $($toolInput.pattern)"
                 }
                 "Grep" {
-                    $bubbleText = "搜索内容: $($input.pattern)"
+                    $bubbleText = "搜索内容: $($toolInput.pattern)"
                 }
                 "TaskCreate" {
-                    $bubbleText = "创建任务: $($input.subject)"
+                    $bubbleText = "创建任务: $($toolInput.subject)"
                 }
                 "TaskUpdate" {
                     $bubbleText = "更新任务状态"
                 }
                 "WebFetch" {
-                    $bubbleText = "获取网页: $($input.url)"
+                    $bubbleText = "获取网页: $($toolInput.url)"
                 }
                 "WebSearch" {
-                    $bubbleText = "搜索网络: $($input.query)"
+                    $bubbleText = "搜索网络: $($toolInput.query)"
                 }
                 "Agent" {
-                    $bubbleText = "启动子代理: $($input.description)"
+                    $bubbleText = "启动子代理: $($toolInput.description)"
                 }
                 "EnterPlanMode" {
                     $bubbleText = "进入规划模式..."
@@ -172,6 +172,31 @@ if ($rawStdin.Trim()) {
         "SessionEnd" {
             $bubbleType = "reviewing"
             $bubbleText = "会话结束"
+            $ttl = 4000
+        }
+
+        "PostToolUseFailure" {
+            $tool = $data.tool_name
+            $bubbleType = "failure"
+            $bubbleText = if ($tool) { "$tool 执行失败" } else { "工具执行失败" }
+            $ttl = 8000
+        }
+
+        "StopFailure" {
+            $bubbleType = "failure"
+            $bubbleText = "Claude 响应出错"
+            $ttl = 8000
+        }
+
+        "SubagentStop" {
+            $bubbleType = "success"
+            $bubbleText = "子代理完成"
+            $ttl = 4000
+        }
+
+        "TaskCompleted" {
+            $bubbleType = "success"
+            $bubbleText = "后台任务完成"
             $ttl = 4000
         }
 
