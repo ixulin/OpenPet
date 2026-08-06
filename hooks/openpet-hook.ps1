@@ -48,10 +48,13 @@ function Truncate-Message {
 }
 
 # ── try stdin first (hook mode) ─────────────────────────────────────────
+# $input is PowerShell's pipeline enumerator — reads piped stdin correctly.
+# [Console]::In reads the console buffer, NOT the pipe, so it returns empty
+# when Claude Code forks this script and pipes JSON to it.
 
-$rawStdin = [Console]::In.ReadToEnd()
+$rawStdin = $input | Out-String
 
-if ($rawStdin) {
+if ($rawStdin.Trim()) {
     # ── Hook mode: Claude Code passed us event JSON via stdin ────────────
     try {
         $data = $rawStdin | ConvertFrom-Json
