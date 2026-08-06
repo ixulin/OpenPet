@@ -100,6 +100,7 @@ export type SkillInstallResult = {
 
 export type ActionPayload = {
   animationId: string;
+  ttlMs?: number | null;
 };
 
 export type SayPayload = {

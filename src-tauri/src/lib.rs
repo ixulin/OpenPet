@@ -399,6 +399,8 @@ impl Default for PetSettings {
 #[serde(rename_all = "camelCase")]
 pub struct ActionPayload {
     pub animation_id: String,
+    #[serde(default)]
+    pub ttl_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2456,6 +2458,7 @@ fn trigger_action(
 ) -> RuntimeSnapshot {
     let payload = ActionPayload {
         animation_id: animation_id.trim().to_string(),
+        ttl_ms: None,
     };
     state.record_action(payload.animation_id.clone());
     let _ = app.emit_to("pet", EVENT_PET_ACTION, payload);
@@ -2719,6 +2722,7 @@ pub(crate) fn emit_companion_event(
             EVENT_PET_ACTION,
             ActionPayload {
                 animation_id: animation_id.as_str().to_string(),
+                ttl_ms: visible_bubble_ttl_ms,
             },
         );
     }

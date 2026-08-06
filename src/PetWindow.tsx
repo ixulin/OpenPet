@@ -208,10 +208,11 @@ export function PetWindow() {
     setHovered(active);
   }, [markActivity]);
 
-  const playAction = useCallback((animationId: PetAnimationId, markAsActivity = true) => {
+  const playAction = useCallback((animationId: PetAnimationId, markAsActivity = true, durationMs?: number) => {
     if (markAsActivity) markActivity();
     if (actionTimerRef.current !== null) window.clearTimeout(actionTimerRef.current);
-    const duration = getPetAnimationDurationMs(getPetAnimation(animationId));
+    const naturalDuration = getPetAnimationDurationMs(getPetAnimation(animationId));
+    const duration = (durationMs !== undefined && durationMs > naturalDuration) ? durationMs : naturalDuration;
     actionActiveUntilRef.current = Date.now() + duration;
     setAnimation(animationId);
     actionTimerRef.current = window.setTimeout(() => {
@@ -544,7 +545,7 @@ export function PetWindow() {
     void Promise.all([
       listen<ActionPayload>('pet-action', (event) => {
         if (cancelled || !isPetAnimationId(event.payload.animationId)) return;
-        playAction(event.payload.animationId);
+        playAction(event.payload.animationId, true, event.payload.ttlMs ?? undefined);
       }),
       listen<SayPayload>('pet-say', (event) => {
         if (!cancelled) say(event.payload);
