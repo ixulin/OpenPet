@@ -1,0 +1,66 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Read|Write|Edit|Glob|Grep|WebFetch|WebSearch|Agent|TaskCreate|TaskUpdate|EnterPlanMode|ExitPlanMode",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe -ExecutionPolicy Bypass -File F:/repo-ixulin/OpenPet/hooks/openpet-hook.ps1"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|Read|Write|Edit|Glob|Grep|WebFetch|WebSearch|Agent|TaskCreate|TaskUpdate|EnterPlanMode|ExitPlanMode",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe -ExecutionPolicy Bypass -File F:/repo-ixulin/OpenPet/hooks/openpet-hook.ps1"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe -ExecutionPolicy Bypass -File F:/repo-ixulin/OpenPet/hooks/openpet-hook.ps1"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe -ExecutionPolicy Bypass -File F:/repo-ixulin/OpenPet/hooks/openpet-hook.ps1"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe -ExecutionPolicy Bypass -File F:/repo-ixulin/OpenPet/hooks/openpet-hook.ps1"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe -ExecutionPolicy Bypass -File F:/repo-ixulin/OpenPet/hooks/openpet-hook.ps1"
+          }
+        ]
+      }
+    ]
+  }
+}
