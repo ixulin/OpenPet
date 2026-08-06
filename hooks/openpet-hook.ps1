@@ -47,7 +47,18 @@ function Truncate-Message {
     return $Text
 }
 
-# ── try stdin first (hook mode) ─────────────────────────────────────────
+# ── CLI mode first (fast path, no stdin) ───────────────────────────────
+# Settings.json hooks use -EventType/-Message/-TtlMs parameters.
+# Process these FIRST to avoid any blocking from $input when stdin pipes
+# are open but empty.
+
+if ($EventType) {
+    $bubbleText = Truncate-Message -Text $Message
+    Send-OpenPetEvent -Type $EventType -Msg $bubbleText -Ttl $TtlMs
+    exit 0
+}
+
+# ── Hook mode (stdin): Claude Code pipes event JSON ────────────────────
 # $input is PowerShell's pipeline enumerator — reads piped stdin correctly.
 # [Console]::In reads the console buffer, NOT the pipe, so it returns empty
 # when Claude Code forks this script and pipes JSON to it.
@@ -55,7 +66,6 @@ function Truncate-Message {
 $rawStdin = $input | Out-String
 
 if ($rawStdin.Trim()) {
-    # ── Hook mode: Claude Code passed us event JSON via stdin ────────────
     try {
         $data = $rawStdin | ConvertFrom-Json
     }
@@ -210,11 +220,5 @@ if ($rawStdin.Trim()) {
     exit 0
 }
 
-# ── CLI mode (no stdin): use explicit parameters ────────────────────────
-
-if (-not $EventType) {
-    # Neither stdin nor params — nothing to do.
-    exit 0
-}
-
-Send-OpenPetEvent -Type $EventType -Msg $Message -Ttl $TtlMs
+# Neither stdin nor params — nothing to do.
+exit 0
