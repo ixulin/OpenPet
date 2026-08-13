@@ -8,6 +8,7 @@
 param(
     [ValidateSet('thinking', 'tool-running', 'reviewing', 'success', 'failure', 'attention')]
     [string]$EventType,
+    [string]$EventName,
     [string]$Message,
     [int]$TtlMs = 600000
 )
@@ -237,9 +238,58 @@ function Show-MsgBox {
 }
 
 # ── CLI mode first (fast path, no stdin) ───────────────────────────────
-# Settings.json hooks use -EventType/-Message/-TtlMs parameters.
+# Settings.json hooks use -EventName/-EventType/-Message/-TtlMs parameters.
 # Process these FIRST to avoid any blocking from $input when stdin pipes
 # are open but empty.
+
+# 事件名快路径：三个关键事件（PermissionRequest/Stop/StopFailure）由
+# settings.json 通过 -EventName 传参调用，不依赖 stdin（Windows 上
+# Claude Code 调用 PowerShell hook 时 stdin 实测为空）。
+if ($EventName) {
+    $bubbleType = "thinking"
+    $bubbleText = ""
+    $msgboxText = ""
+    $msgboxIcon = 64
+
+    switch ($EventName) {
+        "PermissionRequest" {
+            $bubbleType = "attention"
+            $bubbleText = "Claude Code 正在等待权限确认"
+            $msgboxText = "Claude Code 正在等待权限确认，请查看终端"
+            $msgboxIcon = 32
+        }
+        "Stop" {
+            $bubbleType = "reviewing"
+            $bubbleText = "Claude 已完成本轮回复"
+            $msgboxText = "Claude Code 任务已完成"
+            $msgboxIcon = 64
+        }
+        "StopFailure" {
+            $bubbleType = "failure"
+            $bubbleText = "Claude 响应出错"
+            $msgboxText = "Claude Code 响应出错"
+            $msgboxIcon = 16
+        }
+        default {
+            Write-DebugLog ("Unknown EventName: " + $EventName)
+            exit 0
+        }
+    }
+
+    # cwd 前缀：hook 子进程的工作目录即 Claude Code 会话目录
+    $cwdLeaf = Split-Path (Get-Location).Path -Leaf
+    $bubbleText = Truncate-Message -Text $bubbleText -MaxLen 100
+    if ($cwdLeaf -and $bubbleText) {
+        $bubbleText = "[$cwdLeaf] $bubbleText"
+    }
+
+    Write-DebugLog ("EventName=" + $EventName + " -> type=" + $bubbleType + " text=" + $bubbleText + " ttl=600000")
+    Send-OpenPetEvent -Type $bubbleType -Msg $bubbleText -Ttl 600000
+
+    $msgboxPrefix = if ($cwdLeaf) { "[$cwdLeaf] " } else { "" }
+    Show-MsgBox -Text "$msgboxPrefix$msgboxText" -Icon $msgboxIcon
+    exit 0
+}
 
 if ($EventType) {
     Write-DebugLog ("CLI mode: type=" + $EventType + " msg=" + $Message + " ttl=" + $TtlMs)
@@ -262,6 +312,7 @@ if ($rawStdin.Trim()) {
     }
     catch {
         Write-DebugLog ("ConvertFrom-Json FAILED: " + $_.Exception.Message)
+		Show-MsgBox -Text "$msgboxPrefix stdin 为空！" -Icon 16
         # Malformed input – bail silently.
         exit 0
     }
@@ -427,6 +478,7 @@ if ($rawStdin.Trim()) {
     }
     exit 0
 }
+Show-MsgBox -Text "$msgboxPrefix stdin 为空！" -Icon 16
 
 # Neither stdin nor params — nothing to do.
 exit 0
