@@ -9,7 +9,7 @@ param(
     [ValidateSet('thinking', 'tool-running', 'reviewing', 'success', 'failure', 'attention')]
     [string]$EventType,
     [string]$Message,
-    [int]$TtlMs = 6000
+    [int]$TtlMs = 600000
 )
 
 $ErrorActionPreference = 'SilentlyContinue'
@@ -17,7 +17,7 @@ $ErrorActionPreference = 'SilentlyContinue'
 # ── helpers ──────────────────────────────────────────────────────────────
 
 function Send-OpenPetEvent {
-    param([string]$Type, [string]$Msg, [int]$Ttl = 6000)
+    param([string]$Type, [string]$Msg, [int]$Ttl = 600000)
 
     $body = @{ type = $Type }
     if ($Msg) { $body['message'] = $Msg }
@@ -45,6 +45,17 @@ function Truncate-Message {
         return $Text.Substring(0, $MaxLen - 3) + "..."
     }
     return $Text
+}
+
+function Show-MsgBox {
+    param([string]$Text, [string]$Title = "Claude Code", [int]$Seconds = 30, [int]$Icon = 64)
+    try {
+        $shell = New-Object -ComObject WScript.Shell
+        [void]$shell.Popup($Text, $Seconds, $Title, $Icon)
+    }
+    catch {
+        # 非交互会话（无桌面）时静默忽略
+    }
 }
 
 # ── CLI mode first (fast path, no stdin) ───────────────────────────────
@@ -77,12 +88,12 @@ if ($rawStdin.Trim()) {
     $event = $data.hook_event_name
     $bubbleType = "thinking"
     $bubbleText = ""
-    $ttl = 6000
+    $ttl = 600000
 
     switch ($event) {
         "PreToolUse" {
             $bubbleType = "tool-running"
-            $ttl = 10000
+            $ttl = 600000
             $tool = $data.tool_name
             $toolInput = $data.tool_input
 
@@ -140,74 +151,74 @@ if ($rawStdin.Trim()) {
             if ($resp -and $resp -is [string] -and $resp -match "error|Error|failed|Failed") {
                 $bubbleType = "failure"
                 $bubbleText = "$tool 执行出错"
-                $ttl = 8000
+                $ttl = 600000
             }
             else {
                 $bubbleType = "success"
                 $bubbleText = "$tool 完成"
-                $ttl = 4000
+                $ttl = 600000
             }
         }
 
         "Stop" {
             $bubbleType = "reviewing"
             $bubbleText = "Claude 已完成本轮回复"
-            $ttl = 5000
+            $ttl = 600000
         }
 
         "UserPromptSubmit" {
             $bubbleType = "thinking"
             $bubbleText = "收到输入，思考中..."
-            $ttl = 4000
+            $ttl = 600000
         }
 
         "Notification" {
             $bubbleType = "attention"
-            $bubbleText = if ($data.message) { $data.message } else { "收到通知" }
-            $ttl = 8000
+            $bubbleText = if ($data.message) { "通知：$($data.message)" } else { "收到通知" }
+            $ttl = 600000
         }
 
         "PreCompact" {
             $bubbleType = "thinking"
             $bubbleText = "正在压缩上下文..."
-            $ttl = 4000
+            $ttl = 600000
         }
 
         "SessionStart" {
             $bubbleType = "attention"
             $bubbleText = "新会话开始"
-            $ttl = 4000
+            $ttl = 600000
         }
 
         "SessionEnd" {
             $bubbleType = "reviewing"
             $bubbleText = "会话结束"
-            $ttl = 4000
+            $ttl = 600000
         }
 
         "PostToolUseFailure" {
             $tool = $data.tool_name
             $bubbleType = "failure"
             $bubbleText = if ($tool) { "$tool 执行失败" } else { "工具执行失败" }
-            $ttl = 8000
+            $ttl = 600000
         }
 
         "StopFailure" {
             $bubbleType = "failure"
             $bubbleText = "Claude 响应出错"
-            $ttl = 8000
+            $ttl = 600000
         }
 
         "SubagentStop" {
             $bubbleType = "success"
             $bubbleText = "子代理完成"
-            $ttl = 4000
+            $ttl = 600000
         }
 
         "TaskCompleted" {
             $bubbleType = "success"
             $bubbleText = "后台任务完成"
-            $ttl = 4000
+            $ttl = 600000
         }
 
         default {
@@ -215,8 +226,23 @@ if ($rawStdin.Trim()) {
         }
     }
 
-    $bubbleText = Truncate-Message -Text $bubbleText
+    # 先截断主体，再追加工作目录末级目录名，保证目录始终显示
+    $bubbleText = Truncate-Message -Text $bubbleText -MaxLen 100
+
+    $cwdLeaf = if ($data.cwd) { Split-Path $data.cwd -Leaf } else { $null }
+    if ($cwdLeaf -and $bubbleText) {
+        $bubbleText = "[$cwdLeaf] $bubbleText"
+    }
+
     Send-OpenPetEvent -Type $bubbleType -Msg $bubbleText -Ttl $ttl
+
+    # 关键事件弹 msgbox（带超时自动关闭，无人值守时不残留）
+    $msgboxPrefix = if ($cwdLeaf) { "[$cwdLeaf] " } else { "" }
+    switch ($event) {
+        "PermissionRequest" { Show-MsgBox -Text "$msgboxPrefix Claude Code 正在等待权限确认，请查看终端" -Seconds 30 -Icon 32 }
+        "Stop"              { Show-MsgBox -Text "$msgboxPrefix Claude Code 任务已完成" -Seconds 30 -Icon 64 }
+        "StopFailure"       { Show-MsgBox -Text "$msgboxPrefix Claude Code 响应出错" -Seconds 60 -Icon 16 }
+    }
     exit 0
 }
 
