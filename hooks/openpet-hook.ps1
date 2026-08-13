@@ -47,11 +47,103 @@ function Truncate-Message {
     return $Text
 }
 
+# Win32 类型源：仅在 msgbox 场景惰性编译，避免拖慢纯气泡的 CLI 模式
+$ccWin32Source = @"
+using System;
+using System.Runtime.InteropServices;
+public class CCWin32 {
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool FlashWindowEx(ref FLASHWINFO pwfi);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool FlashWindow(IntPtr hwnd, bool bInvert);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool SetForegroundWindow(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool ShowWindow(IntPtr hwnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct FLASHWINFO {
+        public uint cbSize;
+        public IntPtr hwnd;
+        public uint dwFlags;
+        public uint uCount;
+        public uint dwTimeout;
+    }
+
+    public static void FlashForever(IntPtr hwnd) {
+        FLASHWINFO fi = new FLASHWINFO();
+        fi.cbSize = (uint)Marshal.SizeOf(fi);
+        fi.hwnd = hwnd;
+        fi.dwFlags = 3;  // FLASHW_ALL | FLASHW_TIMER
+        fi.uCount = 0;   // 持续闪烁，直到窗口获得焦点或 FlashWindow(hwnd, false)
+        fi.dwTimeout = 0;
+        FlashWindowEx(ref fi);
+    }
+
+    public static void Focus(IntPtr hwnd) {
+        ShowWindow(hwnd, 9);  // SW_RESTORE：最小化时先还原
+        if (!SetForegroundWindow(hwnd)) {
+            // 前台锁兜底：模拟按下/释放 Alt 键解除限制后重试
+            keybd_event(0x12, 0, 0, UIntPtr.Zero);
+            keybd_event(0x12, 0, 2, UIntPtr.Zero);
+            SetForegroundWindow(hwnd);
+        }
+    }
+}
+"@
+
+function Find-ConsoleWindow {
+    # 沿父进程链向上找第一个有主窗口的进程（终端宿主窗口）
+    # 链：hook powershell -> claude node -> shell -> conhost/OpenConsole/mintty/WindowsTerminal
+    $current = $PID
+    for ($i = 0; $i -lt 10; $i++) {
+        $parent = Get-CimInstance Win32_Process -Filter "ProcessId = $current" -ErrorAction SilentlyContinue
+        if (-not $parent -or [int]$parent.ParentProcessId -le 0) { return [IntPtr]::Zero }
+        $ppid = [int]$parent.ParentProcessId
+        $proc = Get-Process -Id $ppid -ErrorAction SilentlyContinue
+        if (-not $proc) { return [IntPtr]::Zero }
+        if ($proc.MainWindowHandle -ne 0) { return [IntPtr]$proc.MainWindowHandle }
+        $current = $ppid
+    }
+    return [IntPtr]::Zero
+}
+
 function Show-MsgBox {
-    param([string]$Text, [string]$Title = "Claude Code", [int]$Seconds = 30, [int]$Icon = 64)
+    param([string]$Text, [string]$Title = "Claude Code", [int]$Seconds = 0, [int]$Icon = 64)
+    # Seconds = 0 表示永久显示，直到用户点击确定（任务栏闪烁同步持续）
     try {
+        if (-not ("CCWin32" -as [type])) {
+            Add-Type -TypeDefinition $ccWin32Source -ErrorAction SilentlyContinue | Out-Null
+        }
+
+        # 弹窗前让对应终端窗口在任务栏持续闪烁
+        $hwnd = [IntPtr]::Zero
+        if ("CCWin32" -as [type]) {
+            $hwnd = Find-ConsoleWindow
+            if ($hwnd -ne [IntPtr]::Zero) {
+                [CCWin32]::FlashForever($hwnd)
+            }
+        }
+
         $shell = New-Object -ComObject WScript.Shell
-        [void]$shell.Popup($Text, $Seconds, $Title, $Icon)
+        $result = $shell.Popup($Text, $Seconds, $Title, $Icon)
+
+        if ("CCWin32" -as [type] -and $hwnd -ne [IntPtr]::Zero) {
+            [CCWin32]::FlashWindow($hwnd, $false) | Out-Null  # 停止闪烁
+            if ($result -eq 1) {
+                [CCWin32]::Focus($hwnd)  # 用户点击确定 → 跳转聚焦终端窗口
+            }
+        }
     }
     catch {
         # 非交互会话（无桌面）时静默忽略
@@ -239,9 +331,9 @@ if ($rawStdin.Trim()) {
     # 关键事件弹 msgbox（带超时自动关闭，无人值守时不残留）
     $msgboxPrefix = if ($cwdLeaf) { "[$cwdLeaf] " } else { "" }
     switch ($event) {
-        "PermissionRequest" { Show-MsgBox -Text "$msgboxPrefix Claude Code 正在等待权限确认，请查看终端" -Seconds 30 -Icon 32 }
-        "Stop"              { Show-MsgBox -Text "$msgboxPrefix Claude Code 任务已完成" -Seconds 30 -Icon 64 }
-        "StopFailure"       { Show-MsgBox -Text "$msgboxPrefix Claude Code 响应出错" -Seconds 60 -Icon 16 }
+        "PermissionRequest" { Show-MsgBox -Text "$msgboxPrefix Claude Code 正在等待权限确认，请查看终端" -Icon 32 }
+        "Stop"              { Show-MsgBox -Text "$msgboxPrefix Claude Code 任务已完成" -Icon 64 }
+        "StopFailure"       { Show-MsgBox -Text "$msgboxPrefix Claude Code 响应出错" -Icon 16 }
     }
     exit 0
 }
