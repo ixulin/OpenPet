@@ -14,6 +14,19 @@ param(
 
 $ErrorActionPreference = 'SilentlyContinue'
 
+# ── debug logging (OPENPET_HOOK_DEBUG=1) ──────────────────────────────
+$debugLogPath = $null
+if ($env:OPENPET_HOOK_DEBUG -eq '1') {
+    $debugLogPath = Join-Path $env:TEMP 'openpet-hook-debug.log'
+}
+function Write-DebugLog {
+    param([string]$Msg)
+    if ($debugLogPath) {
+        $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'
+        Add-Content -Path $debugLogPath -Value "[$ts] $Msg" -Encoding UTF8
+    }
+}
+
 # ── helpers ──────────────────────────────────────────────────────────────
 
 function Send-OpenPetEvent {
@@ -102,6 +115,63 @@ public class CCWin32 {
 }
 "@
 
+# WinForms 置顶弹窗类型源：TopMost Form（WS_EX_TOPMOST）保证弹窗持续浮于
+# 所有普通窗口之上——即使点击其他应用也不会被覆盖，直到用户点击确定。
+$topBoxSource = @"
+using System;
+using System.Drawing;
+using System.Windows.Forms;
+
+public class TopBox {
+    public static int Show(string text, string caption, int iconType) {
+        using (var f = new Form()) {
+            f.Text = caption;
+            f.StartPosition = FormStartPosition.CenterScreen;
+            f.FormBorderStyle = FormBorderStyle.FixedDialog;
+            f.MaximizeBox = false;
+            f.MinimizeBox = false;
+            f.ShowInTaskbar = false;
+            f.TopMost = true;  // 持续置顶，点击其他应用时焦点可转移但窗口不被覆盖
+            f.ClientSize = new Size(400, 140);
+
+            var pic = new PictureBox {
+                Location = new Point(16, 20),
+                Size = new Size(32, 32),
+                SizeMode = PictureBoxSizeMode.Zoom
+            };
+            switch (iconType) {
+                case 16: pic.Image = SystemIcons.Error.ToBitmap(); break;
+                case 32: pic.Image = SystemIcons.Question.ToBitmap(); break;
+                case 48: pic.Image = SystemIcons.Warning.ToBitmap(); break;
+                default: pic.Image = SystemIcons.Information.ToBitmap(); break;
+            }
+            f.Controls.Add(pic);
+
+            var lbl = new Label {
+                Text = text,
+                Location = new Point(64, 14),
+                AutoSize = true,
+                MaximumSize = new Size(316, 0),
+                Font = new Font("Microsoft YaHei UI", 9F)
+            };
+            f.Controls.Add(lbl);
+
+            var btn = new Button {
+                Text = "确定",
+                DialogResult = DialogResult.OK,
+                Size = new Size(88, 28),
+                Location = new Point(156, 98)
+            };
+            f.Controls.Add(btn);
+            f.AcceptButton = btn;
+            f.CancelButton = btn;
+
+            return f.ShowDialog() == DialogResult.OK ? 1 : 0;
+        }
+    }
+}
+"@
+
 function Find-ConsoleWindow {
     # 沿父进程链向上找第一个有主窗口的进程（终端宿主窗口）
     # 链：hook powershell -> claude node -> shell -> conhost/OpenConsole/mintty/WindowsTerminal
@@ -135,8 +205,24 @@ function Show-MsgBox {
             }
         }
 
-        $shell = New-Object -ComObject WScript.Shell
-        $result = $shell.Popup($Text, $Seconds, $Title, $Icon)
+        # 持续置顶弹窗：WinForms TopMost Form（WS_EX_TOPMOST），
+        # 点击其他应用也不会被覆盖，直到用户点击确定。
+        # 返回值：确定 = 1（与 WScript Popup 的 OK 一致，后续 $result -eq 1 判断通用）
+        # 注意：不支持超时自动关闭（当前所有调用均为永久显示，无影响）
+        $result = $null
+        if (-not ("TopBox" -as [type])) {
+            # -TypeDefinition 编译不会自动引用 -AssemblyName 加载的程序集，
+            # 必须通过 -ReferencedAssemblies 显式声明
+            Add-Type -TypeDefinition $topBoxSource -ReferencedAssemblies @('System.Windows.Forms', 'System.Drawing') -ErrorAction SilentlyContinue | Out-Null
+        }
+        if ("TopBox" -as [type]) {
+            $result = [TopBox]::Show($Text, $Title, $Icon)
+        }
+        else {
+            # 兜底：WinForms 编译失败（如非交互会话）时退化为普通弹窗
+            $shell = New-Object -ComObject WScript.Shell
+            $result = $shell.Popup($Text, $Seconds, $Title, $Icon)
+        }
 
         if ("CCWin32" -as [type] -and $hwnd -ne [IntPtr]::Zero) {
             [CCWin32]::FlashWindow($hwnd, $false) | Out-Null  # 停止闪烁
@@ -156,6 +242,7 @@ function Show-MsgBox {
 # are open but empty.
 
 if ($EventType) {
+    Write-DebugLog ("CLI mode: type=" + $EventType + " msg=" + $Message + " ttl=" + $TtlMs)
     $bubbleText = Truncate-Message -Text $Message
     Send-OpenPetEvent -Type $EventType -Msg $bubbleText -Ttl $TtlMs
     exit 0
@@ -167,12 +254,14 @@ if ($EventType) {
 # when Claude Code forks this script and pipes JSON to it.
 
 $rawStdin = $input | Out-String
+Write-DebugLog ("stdin len=" + $rawStdin.Length + " content=" + $rawStdin.Substring(0, [Math]::Min(300, $rawStdin.Length)))
 
 if ($rawStdin.Trim()) {
     try {
         $data = $rawStdin | ConvertFrom-Json
     }
     catch {
+        Write-DebugLog ("ConvertFrom-Json FAILED: " + $_.Exception.Message)
         # Malformed input – bail silently.
         exit 0
     }
@@ -326,6 +415,7 @@ if ($rawStdin.Trim()) {
         $bubbleText = "[$cwdLeaf] $bubbleText"
     }
 
+    Write-DebugLog ("event=" + $event + " -> type=" + $bubbleType + " text=" + $bubbleText + " ttl=" + $ttl)
     Send-OpenPetEvent -Type $bubbleType -Msg $bubbleText -Ttl $ttl
 
     # 关键事件弹 msgbox（带超时自动关闭，无人值守时不残留）

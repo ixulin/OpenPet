@@ -16,6 +16,22 @@ const arg = (name) => {
   return i >= 0 ? argv[i + 1] : undefined;
 };
 
+// ── debug logging (OPENPET_HOOK_DEBUG=1) ──────────────────────────────
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+const dbg = (msg) => {
+  if (process.env.OPENPET_HOOK_DEBUG !== "1") return;
+  try {
+    fs.appendFileSync(
+      path.join(os.tmpdir(), "openpet-hook-debug.log"),
+      `[${new Date().toISOString()}] ${msg}\n`,
+    );
+  } catch {
+    // never let debug logging break the hook
+  }
+};
+
 const truncate = (text, maxLen = 100) => {
   if (!text) return "";
   return text.length > maxLen ? text.slice(0, maxLen - 3) + "..." : text;
@@ -68,6 +84,7 @@ async function sendEvent(type, message, ttlMs = 600000) {
 let raw = "";
 process.stdin.setEncoding("utf8");
 for await (const chunk of process.stdin) raw += chunk;
+dbg(`stdin len=${raw.length} content=${raw.slice(0, 300)}`);
 
 if (!raw.trim()) {
   const ttl = Number.parseInt(arg("--ttl") ?? "600000", 10);
@@ -78,8 +95,9 @@ if (!raw.trim()) {
 let data;
 try {
   data = JSON.parse(raw);
-} catch {
+} catch (e) {
   // Malformed input — bail silently.
+  dbg(`JSON.parse FAILED: ${e.message}`);
   const ttl = Number.parseInt(arg("--ttl") ?? "600000", 10);
   await sendEvent("success", truncate("stdin为空！", 120), ttl);
   process.exit(0);
@@ -190,5 +208,6 @@ if (cwdLeaf && bubbleText) {
   bubbleText = `[${cwdLeaf}] ${bubbleText}`;
 }
 
+dbg(`event=${event} -> type=${bubbleType} text=${bubbleText} ttl=${ttl}`);
 await sendEvent(bubbleType, bubbleText, ttl);
 process.exit(0);
