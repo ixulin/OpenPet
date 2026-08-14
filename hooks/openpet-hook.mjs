@@ -90,7 +90,7 @@ if (!raw.trim()) {
   const ttl = Number.parseInt(arg("--ttl") ?? "600000", 10);
   await sendEvent("success", truncate("stdin为空！", 120), ttl);
   process.exit(0);
-} 
+}
 
 let data;
 try {
@@ -142,6 +142,7 @@ switch (event) {
     } else {
       bubbleType = "success";
       bubbleText = `${tool} 完成`;
+      process.exit(0);
     }
     break;
   }
@@ -189,6 +190,7 @@ switch (event) {
   case "SubagentStop":
     bubbleType = "success";
     bubbleText = "子代理完成";
+    process.exit(0);
     break;
 
   case "TaskCompleted":
